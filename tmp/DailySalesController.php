@@ -20,10 +20,48 @@ class DailySalesController extends Base
           })
         ->groupBy('bookings.operation_date')
         ->selectRaw('bookings.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id as batch_id, mall_batch_logs.updated_at as updated_at')
-	->orderBy('bookings.operation_date', 'desc')
+	->orderBy('bookings.operation_date', 'asc')
 	->get()
         //->sortByDesc('bookings.operation_date');
         ->take(30);
+
+        $booking_sums_alt = Booking::rightJoin('mall_batch_logs', function($join) {
+            $join->on('bookings.operation_date', '=', 'mall_batch_logs.operation_date');
+          })
+        ->groupBy('mall_batch_logs.operation_date')
+        ->selectRaw('mall_batch_logs.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id as batch_id, mall_batch_logs.updated_at as updated_at')
+  ->orderBy('mall_batch_logs.operation_date', 'asc')
+  ->get()
+        //->sortByDesc('bookings.operation_date');
+        ->take(30);
+
+        $booking_sums_new = [];
+        $key_alt_last = -1;
+        
+        // while($today_date > $current_date){
+          foreach($booking_sums as $key => $sum){
+            foreach($booking_sums_alt as $key_alt => $sum_alt){
+              if($sum->operation_date > $sum_alt->operation_date && $key_alt_last < $key_alt){
+                array_push($booking_sums_new, $sum_alt);
+                $key_alt_last = $key_alt;
+              }
+            }
+            array_push($booking_sums_new, $sum);
+            if($key+1 == count($booking_sums)){
+              foreach($booking_sums_alt as $key_alt => $sum_alt){
+                if($key_alt_last < $key_alt){
+                  array_push($booking_sums_new, $sum_alt);
+                  $key_alt_last = $key_alt;
+                }
+              }
+            }
+          }
+          if(!count($booking_sums)){
+            $booking_sums_new = $booking_sums_alt;
+          }
+        // }
+
+        $booking_sums = $booking_sums_new;
 
         return view('booking_service.daily_sales.index')->with([
             'booking_sums' => $booking_sums
@@ -91,6 +129,14 @@ class DailySalesController extends Base
             ->where('bookings.operation_date','=',$dateFrom->format('Y-m-d'))
             ->selectRaw('bookings.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id, mall_batch_logs.updated_at')
             ->get();
+
+            $booking_sums_alt = Booking::rightJoin('mall_batch_logs', function($join) {
+                $join->on('bookings.operation_date', '=', 'mall_batch_logs.operation_date');
+              })
+            ->groupBy('mall_batch_logs.operation_date')
+            ->where('mall_batch_logs.operation_date','=',$dateFrom->format('Y-m-d'))
+            ->selectRaw('mall_batch_logs.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id, mall_batch_logs.updated_at')
+            ->get();
           }
           else
           {
@@ -101,7 +147,43 @@ class DailySalesController extends Base
             ->whereBetween('bookings.operation_date',[$dateFrom->format('Y-m-d'), $dateTo->format('Y-m-d')])
             ->selectRaw('bookings.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id, mall_batch_logs.updated_at')
             ->get();
+
+            $booking_sums_alt = Booking::rightJoin('mall_batch_logs', function($join) {
+                $join->on('bookings.operation_date', '=', 'mall_batch_logs.operation_date');
+              })
+            ->groupBy('mall_batch_logs.operation_date')
+            ->whereBetween('mall_batch_logs.operation_date',[$dateFrom->format('Y-m-d'), $dateTo->format('Y-m-d')])
+            ->selectRaw('mall_batch_logs.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id, mall_batch_logs.updated_at')
+            ->get();
           }
+
+          $booking_sums_new = [];
+          $key_alt_last = -1;
+          
+          // while($today_date > $current_date){
+            foreach($booking_sums as $key => $sum){
+              foreach($booking_sums_alt as $key_alt => $sum_alt){
+                if($sum->operation_date > $sum_alt->operation_date && $key_alt_last < $key_alt){
+                  array_push($booking_sums_new, $sum_alt);
+                  $key_alt_last = $key_alt;
+                }
+              }
+              array_push($booking_sums_new, $sum);
+              if($key+1 == count($booking_sums)){
+                foreach($booking_sums_alt as $key_alt => $sum_alt){
+                  if($key_alt_last < $key_alt){
+                    array_push($booking_sums_new, $sum_alt);
+                    $key_alt_last = $key_alt;
+                  }
+                }
+              }
+            }
+            if(!count($booking_sums)){
+              $booking_sums_new = $booking_sums_alt;
+            }
+          // }
+  
+          $booking_sums = $booking_sums_new;
 
           return view('booking_service.daily_sales.index')->with([
             'booking_sums' => $booking_sums,
