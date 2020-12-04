@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use AppPay\Http\Controllers\Controller;
 use AppPay\Http\Controllers\Backend\Base;
 use AppPay\Models\BookingService\Booking;
+use AppPay\Models\BookingService\SysParameter;
 
 class DailySalesController extends Base
 {
@@ -20,7 +21,7 @@ class DailySalesController extends Base
           })
         ->groupBy('bookings.operation_date')
         ->selectRaw('bookings.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id as batch_id, mall_batch_logs.updated_at as updated_at')
-	->orderBy('bookings.operation_date', 'asc')
+	->orderBy('bookings.operation_date', 'desc')
 	->get()
         //->sortByDesc('bookings.operation_date');
         ->take(30);
@@ -30,48 +31,110 @@ class DailySalesController extends Base
           })
         ->groupBy('mall_batch_logs.operation_date')
         ->selectRaw('mall_batch_logs.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id as batch_id, mall_batch_logs.updated_at as updated_at')
-  ->orderBy('mall_batch_logs.operation_date', 'asc')
+  ->orderBy('mall_batch_logs.operation_date', 'desc')
   ->get()
         //->sortByDesc('bookings.operation_date');
         ->take(30);
 
+        // note: $booking_sums is sorted in descending order
+
         $booking_sums_new = [];
-        $key_last = -1;
-        $key_alt_last = -1;
-        $operation_date_last = '0000-00-00';
-        
-        // while($today_date > $current_date){
-          // loop every bookings
-          foreach($booking_sums as $key => $sum){
-            // loop every mall_batch_logs
-            foreach($booking_sums_alt as $key_alt => $sum_alt){
-              // if booking operation_date is larger than mall_batch_log operation_date, do something
-              if($sum->operation_date > $sum_alt->operation_date && $sum_alt->operation_date > $operation_date_last && $key_alt_last < $key_alt){
-                // push mall_batch_log to array
-                array_push($booking_sums_new, $sum_alt);
-                $key_alt_last = $key_alt;
-                $operation_date_last = $sum_alt->operation_date;
-              }
-            }
-            // push booking to array
-            array_push($booking_sums_new, $sum);
-            $key_last = $key;
-            $operation_date_last = $sum->operation_date;
-            // if reached last booking, continue push mall_batch_log
-            if($key+1 == count($booking_sums)){
+        $outlet = SysParameter::first();
+        $operation_date_first = date('Y-m-d');
+        $operation_date_last = date('Y-m-d', strtotime($outlet->created_at ?? ( $booking_sums[count($booking_sums)-1]->operation_date ?? '2019-01-01' )));
+        $operation_date_prev =  date('Y-m-d', strtotime('+1 day', strtotime($operation_date_first)));
+
+        // // prevent overflow and underflow
+        // if($operation_date_first > date('Y-m-d')){
+        //   $operation_date_first = date('Y-m-d');
+        // }
+        // if($outlet->created_at && $operation_date_last < strtotime($outlet->created_at)){
+        //   $operation_date_last = $outlet->created_at;
+        // }
+
+        if(!count($booking_sums)){
+          // no bookings, fallback to mall_batch_logs
+          $booking_sums = $booking_sums_alt;
+          if(!count($booking_sums_alt)){
+            // no bookings and mall_batch_logs, push a dummy data to trigger the flow
+            $booking_sums = [
+              0 => (object)[
+                'operation_date' => $operation_date_first,
+                'total_payment'  => 0.00,
+                'total_booking'  => 0,
+                'batch_id'       => null,
+                'updated_at'     => null,
+              ]
+            ];
+          }
+        }
+
+        // loop all bookings
+        foreach($booking_sums as $key => $sum){
+
+          // check for empty bookings before first booking or subsequent bookings
+          if(($key == 0 && $operation_date_first > $sum->operation_date) || ($key && $operation_date_prev > $sum->operation_date)){
+            // if target operation_date is larger than booking operation_date, do something
+            while(date('Y-m-d', strtotime('-1 day', strtotime($operation_date_prev))) > $sum->operation_date){
+              $operation_date_current = date('Y-m-d', strtotime('-1 day', strtotime($operation_date_prev)));
+              $sum_tmp = null;
+              // loop all mall_batch_logs
               foreach($booking_sums_alt as $key_alt => $sum_alt){
-                if($sum_alt->operation_date > $operation_date_last && $key_alt_last < $key_alt){
-                  array_push($booking_sums_new, $sum_alt);
-                  $key_alt_last = $key_alt;
-                  $operation_date_last = $sum_alt->operation_date;
+                // if mall_batch_log operation_date is same as target operation_date, use this mall_batch_log
+                if($sum_alt->operation_date == $operation_date_current){
+                  $sum_tmp = $sum_alt;
+                  break 1;
                 }
               }
+              // if no matching mall_batch_log, create empty record manually
+              if(is_null($sum_tmp)){
+                $sum_tmp = (object)[
+                  'operation_date' => $operation_date_current,
+                  'total_payment'  => 0.00,
+                  'total_booking'  => 0,
+                  'batch_id'       => null,
+                  'updated_at'     => null,
+                ];
+              }
+              // push mall_batch_logs to array
+              array_push($booking_sums_new, $sum_tmp);
+              $operation_date_prev = $operation_date_current;
             }
           }
-          // if no bookings, fallback to mall_batch_logs
-          if(!count($booking_sums)){
-            $booking_sums_new = $booking_sums_alt;
+
+          // push booking to array
+          array_push($booking_sums_new, $sum);
+          $operation_date_prev = $sum->operation_date;
+
+          // check for empty booking after last booking
+          if($key+1 == count($booking_sums) && $sum->operation_date > $operation_date_last){
+            while(date('Y-m-d', strtotime($operation_date_prev)) > $operation_date_last){
+              $operation_date_current = date('Y-m-d', strtotime('-1 day', strtotime($operation_date_prev)));
+              $sum_tmp = null;
+              foreach($booking_sums_alt as $key_alt => $sum_alt){
+                if($sum_alt->operation_date == $operation_date_current){
+                  $sum_tmp = $sum_alt;
+                  break 1;
+                }
+              }
+              if(!$sum_tmp){
+                $sum_tmp = (object)[
+                  'operation_date' => $operation_date_current,
+                  'total_payment'  => 0.00,
+                  'total_booking'  => 0,
+                  'batch_id'       => null,
+                  'updated_at'     => null,
+                ];
+              }
+              array_push($booking_sums_new, $sum_tmp);
+              $operation_date_prev = $operation_date_current;
+            }
           }
+        }
+
+        // // if no bookings, fallback to mall_batch_logs
+        // if(!count($booking_sums)){
+        //   $booking_sums_new = $booking_sums_alt;
         // }
 
         $booking_sums = $booking_sums_new;
@@ -170,45 +233,107 @@ class DailySalesController extends Base
             ->get();
           }
 
+          // note: $booking_sums is sorted in descending order
+
           $booking_sums_new = [];
-          $key_last = -1;
-          $key_alt_last = -1;
-          $operation_date_last = '0000-00-00';
-          
-          // while($today_date > $current_date){
-            // loop every bookings
-            foreach($booking_sums as $key => $sum){
-              // loop every mall_batch_logs
-              foreach($booking_sums_alt as $key_alt => $sum_alt){
-                // if booking operation_date is larger than mall_batch_log operation_date, do something
-                if($sum->operation_date > $sum_alt->operation_date && $sum_alt->operation_date > $operation_date_last && $key_alt_last < $key_alt){
-                  // push mall_batch_log to array
-                  array_push($booking_sums_new, $sum_alt);
-                  $key_alt_last = $key_alt;
-                  $operation_date_last = $sum_alt->operation_date;
-                }
-              }
-              // push booking to array
-              array_push($booking_sums_new, $sum);
-              $key_last = $key;
-              $operation_date_last = $sum->operation_date;
-              // if reached last booking, continue push mall_batch_log
-              if($key+1 == count($booking_sums)){
+          $outlet = SysParameter::first();
+          $operation_date_first = date('Y-m-d', strtotime($dateTo->format('Y-m-d')));
+          $operation_date_last = date('Y-m-d', strtotime($dateFrom->format('Y-m-d')));
+          $operation_date_prev =  date('Y-m-d', strtotime('+1 day', strtotime($operation_date_first)));
+
+          // // prevent overflow and underflow
+          // if($operation_date_first > date('Y-m-d')){
+          //   $operation_date_first = date('Y-m-d');
+          // }
+          // if($outlet->created_at && $operation_date_last < strtotime($outlet->created_at)){
+          //   $operation_date_last = $outlet->created_at;
+          // }
+
+          if(!count($booking_sums)){
+            // no bookings, fallback to mall_batch_logs
+            $booking_sums = $booking_sums_alt;
+            if(!count($booking_sums_alt)){
+              // no bookings and mall_batch_logs, push a dummy data to trigger the flow
+              $booking_sums = [
+                0 => (object)[
+                  'operation_date' => $operation_date_first,
+                  'total_payment'  => 0.00,
+                  'total_booking'  => 0,
+                  'batch_id'       => null,
+                  'updated_at'     => null,
+                ]
+              ];
+            }
+          }
+
+          // loop all bookings
+          foreach($booking_sums as $key => $sum){
+
+            // check for empty bookings before first booking or subsequent bookings
+            if(($key == 0 && $operation_date_first > $sum->operation_date) || ($key && $operation_date_prev > $sum->operation_date)){
+              // if target operation_date is larger than booking operation_date, do something
+              while(date('Y-m-d', strtotime('-1 day', strtotime($operation_date_prev))) > $sum->operation_date){
+                $operation_date_current = date('Y-m-d', strtotime('-1 day', strtotime($operation_date_prev)));
+                $sum_tmp = null;
+                // loop all mall_batch_logs
                 foreach($booking_sums_alt as $key_alt => $sum_alt){
-                  if($sum_alt->operation_date > $operation_date_last && $key_alt_last < $key_alt){
-                    array_push($booking_sums_new, $sum_alt);
-                    $key_alt_last = $key_alt;
-                    $operation_date_last = $sum_alt->operation_date;
+                  // if mall_batch_log operation_date is same as target operation_date, use this mall_batch_log
+                  if($sum_alt->operation_date == $operation_date_current){
+                    $sum_tmp = $sum_alt;
+                    break 1;
                   }
                 }
+                // if no matching mall_batch_log, create empty record manually
+                if(is_null($sum_tmp)){
+                  $sum_tmp = (object)[
+                    'operation_date' => $operation_date_current,
+                    'total_payment'  => 0.00,
+                    'total_booking'  => 0,
+                    'batch_id'       => null,
+                    'updated_at'     => null,
+                  ];
+                }
+                // push mall_batch_logs to array
+                array_push($booking_sums_new, $sum_tmp);
+                $operation_date_prev = $operation_date_current;
               }
             }
-            // if no bookings, fallback to mall_batch_logs
-            if(!count($booking_sums)){
-              $booking_sums_new = $booking_sums_alt;
+
+            // push booking to array
+            array_push($booking_sums_new, $sum);
+            $operation_date_prev = $sum->operation_date;
+
+            // check for empty booking after last booking
+            if($key+1 == count($booking_sums) && $sum->operation_date > $operation_date_last){
+              while(date('Y-m-d', strtotime($operation_date_prev)) > $operation_date_last){
+                $operation_date_current = date('Y-m-d', strtotime('-1 day', strtotime($operation_date_prev)));
+                $sum_tmp = null;
+                foreach($booking_sums_alt as $key_alt => $sum_alt){
+                  if($sum_alt->operation_date == $operation_date_current){
+                    $sum_tmp = $sum_alt;
+                    break 1;
+                  }
+                }
+                if(!$sum_tmp){
+                  $sum_tmp = (object)[
+                    'operation_date' => $operation_date_current,
+                    'total_payment'  => 0.00,
+                    'total_booking'  => 0,
+                    'batch_id'       => null,
+                    'updated_at'     => null,
+                  ];
+                }
+                array_push($booking_sums_new, $sum_tmp);
+                $operation_date_prev = $operation_date_current;
+              }
             }
+          }
+
+          // // if no bookings, fallback to mall_batch_logs
+          // if(!count($booking_sums)){
+          //   $booking_sums_new = $booking_sums_alt;
           // }
-  
+
           $booking_sums = $booking_sums_new;
 
           return view('booking_service.daily_sales.index')->with([
