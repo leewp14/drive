@@ -36,26 +36,39 @@ class DailySalesController extends Base
         ->take(30);
 
         $booking_sums_new = [];
+        $key_last = -1;
         $key_alt_last = -1;
+        $operation_date_last = '0000-00-00';
         
         // while($today_date > $current_date){
+          // loop every bookings
           foreach($booking_sums as $key => $sum){
+            // loop every mall_batch_logs
             foreach($booking_sums_alt as $key_alt => $sum_alt){
-              if($sum->operation_date > $sum_alt->operation_date && $key_alt_last < $key_alt){
+              // if booking operation_date is larger than mall_batch_log operation_date, do something
+              if($sum->operation_date > $sum_alt->operation_date && $sum_alt->operation_date > $operation_date_last && $key_alt_last < $key_alt){
+                // push mall_batch_log to array
                 array_push($booking_sums_new, $sum_alt);
                 $key_alt_last = $key_alt;
+                $operation_date_last = $sum_alt->operation_date;
               }
             }
+            // push booking to array
             array_push($booking_sums_new, $sum);
+            $key_last = $key;
+            $operation_date_last = $sum->operation_date;
+            // if reached last booking, continue push mall_batch_log
             if($key+1 == count($booking_sums)){
               foreach($booking_sums_alt as $key_alt => $sum_alt){
-                if($key_alt_last < $key_alt){
+                if($sum_alt->operation_date > $operation_date_last && $key_alt_last < $key_alt){
                   array_push($booking_sums_new, $sum_alt);
                   $key_alt_last = $key_alt;
+                  $operation_date_last = $sum_alt->operation_date;
                 }
               }
             }
           }
+          // if no bookings, fallback to mall_batch_logs
           if(!count($booking_sums)){
             $booking_sums_new = $booking_sums_alt;
           }
@@ -158,26 +171,39 @@ class DailySalesController extends Base
           }
 
           $booking_sums_new = [];
+          $key_last = -1;
           $key_alt_last = -1;
+          $operation_date_last = '0000-00-00';
           
           // while($today_date > $current_date){
+            // loop every bookings
             foreach($booking_sums as $key => $sum){
+              // loop every mall_batch_logs
               foreach($booking_sums_alt as $key_alt => $sum_alt){
-                if($sum->operation_date > $sum_alt->operation_date && $key_alt_last < $key_alt){
+                // if booking operation_date is larger than mall_batch_log operation_date, do something
+                if($sum->operation_date > $sum_alt->operation_date && $sum_alt->operation_date > $operation_date_last && $key_alt_last < $key_alt){
+                  // push mall_batch_log to array
                   array_push($booking_sums_new, $sum_alt);
                   $key_alt_last = $key_alt;
+                  $operation_date_last = $sum_alt->operation_date;
                 }
               }
+              // push booking to array
               array_push($booking_sums_new, $sum);
+              $key_last = $key;
+              $operation_date_last = $sum->operation_date;
+              // if reached last booking, continue push mall_batch_log
               if($key+1 == count($booking_sums)){
                 foreach($booking_sums_alt as $key_alt => $sum_alt){
-                  if($key_alt_last < $key_alt){
+                  if($sum_alt->operation_date > $operation_date_last && $key_alt_last < $key_alt){
                     array_push($booking_sums_new, $sum_alt);
                     $key_alt_last = $key_alt;
+                    $operation_date_last = $sum_alt->operation_date;
                   }
                 }
               }
             }
+            // if no bookings, fallback to mall_batch_logs
             if(!count($booking_sums)){
               $booking_sums_new = $booking_sums_alt;
             }
