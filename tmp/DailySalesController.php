@@ -204,6 +204,7 @@ class DailySalesController extends Base
             ->groupBy('bookings.operation_date')
             ->where('bookings.operation_date','=',$dateFrom->format('Y-m-d'))
             ->selectRaw('bookings.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id, mall_batch_logs.updated_at')
+            ->orderBy('bookings.operation_date', 'desc')
             ->get();
 
             $booking_sums_alt = Booking::rightJoin('mall_batch_logs', function($join) {
@@ -212,6 +213,7 @@ class DailySalesController extends Base
             ->groupBy('mall_batch_logs.operation_date')
             ->where('mall_batch_logs.operation_date','=',$dateFrom->format('Y-m-d'))
             ->selectRaw('mall_batch_logs.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id, mall_batch_logs.updated_at')
+            ->orderBy('mall_batch_logs.operation_date', 'desc')
             ->get();
           }
           else
@@ -222,6 +224,7 @@ class DailySalesController extends Base
             ->groupBy('bookings.operation_date')
             ->whereBetween('bookings.operation_date',[$dateFrom->format('Y-m-d'), $dateTo->format('Y-m-d')])
             ->selectRaw('bookings.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id, mall_batch_logs.updated_at')
+            ->orderBy('bookings.operation_date', 'desc')
             ->get();
 
             $booking_sums_alt = Booking::rightJoin('mall_batch_logs', function($join) {
@@ -230,6 +233,7 @@ class DailySalesController extends Base
             ->groupBy('mall_batch_logs.operation_date')
             ->whereBetween('mall_batch_logs.operation_date',[$dateFrom->format('Y-m-d'), $dateTo->format('Y-m-d')])
             ->selectRaw('mall_batch_logs.operation_date, sum(payment_amount) as total_payment, count(*) as total_booking, mall_batch_logs.batch_id, mall_batch_logs.updated_at')
+            ->orderBy('mall_batch_logs.operation_date', 'desc')
             ->get();
           }
 
